@@ -1,9 +1,13 @@
 # flake8: noqa
 
+import numpy as np
 from rdkit import Chem
 from typing import List, Tuple, Union, Dict, Set, Sequence
 import deepchem as dc
-from deepchem.utils.typing import RDKitAtom
+from deepchem.utils.typing import RDKitAtom, RDKitBond, RDKitMol
+
+from deepchem.feat.graph_data import GraphData
+from deepchem.feat.base_classes import MolecularFeaturizer
 
 from deepchem.utils.molecule_feature_utils import one_hot_encode
 from deepchem.utils.molecule_feature_utils import get_atom_total_degree_one_hot
@@ -254,3 +258,107 @@ def map_reac_to_prod(
                   List[int]] = (reac_id_to_prod_id, only_prod_ids,
                                 only_reac_ids)
   return mappings
+
+
+class DMPNNFeaturizer(MolecularFeaturizer):
+  """
+  This class is a featurizer for Directed Message Passing Neural Network (D-MPNN) implementation
+  """
+
+  def __init__(self,
+               features_generator,
+               is_adding_hs: bool = False,
+               features_scaling: bool = False,
+               atom_descriptor_scaling: bool = False,
+               bond_feature_scaling: bool = False) -> None:
+
+    self.features_generator = features_generator
+    self.is_adding_hs = is_adding_hs
+    self.features_scaling = features_scaling
+    self.atom_descriptor_scaling = atom_descriptor_scaling
+    self.bond_feature_scaling = bond_feature_scaling
+    self.atom_descriptors = None
+    self.phase_features = None
+
+  def _featurize(self, datapoint: RDKitMol, **kwargs) -> GraphData:
+
+    if isinstance(datapoint, Chem.rdchem.Mol):
+      if self.is_adding_hs:
+        datapoint = Chem.AddHs(datapoint)
+    else:
+      raise ValueError(
+          "Feature field should contain smiles for DMPNN featurizer!")
+
+    n_atoms: int  # number of atoms
+    n_bonds: int = 0  # number of bonds
+    f_atoms: np.ndarray  # mapping from atom index to atom features
+    f_ini_atoms_bonds: np.ndarray = np.asarray(
+        [])  # mapping from bond index to concat(in_atom, bond) features
+    a2b: List[List[int]]  # mapping from atom index to incoming bond indices
+    b2a: List[int] = [
+    ]  # mapping from bond index to the index of the atom the bond is coming from
+    b2revb: List[int] = [
+    ]  # mapping from bond index to the index of the reverse bon
+
+    # get atom features
+    f_atoms = np.asarray([atom_features(atom) for atom in datapoint.GetAtoms()])
+    n_atoms = len(f_atoms)
+
+    # construct edge (bond) index
+    src, dest = [], []
+    for bond in datapoint.GetBonds():
+      # add edge list considering a directed graph
+      start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+      src += [start, end]
+      dest += [end, start]
+
+    # initialize atom to bond mapping for each atom
+    a2b = [[] for i in range(n_atoms)]
+
+    # get bond features
+    for a1 in range(n_atoms):
+      for a2 in range(a1 + 1, n_atoms):
+        bond = datapoint.GetBondBetweenAtoms(a1, a2)
+
+        if bond is None:
+          continue
+
+        f_bond: np.ndarray = np.asarray(bond_features(bond))
+
+        np.append(f_ini_atoms_bonds, f_atoms[a1].extend(f_bond))
+        np.append(f_ini_atoms_bonds, f_atoms[a2].extend(f_bond))
+
+        b1 = n_bonds
+        b2 = b1 + 1
+
+        a2b[a2].append(b1)  # b1 = a1 --> a2
+        a2b[a1].append(b2)  # b2 = a2 --> a1
+
+        b2a.append(a1)
+        b2a.append(a2)
+
+        b2revb.append(b2)
+        b2revb.append(b1)
+
+        n_bonds += 2
+
+    max_num_bonds = max(1, max(len(incoming_bonds) for incoming_bonds in a2b))
+    a2b = [a2b[a] + [0] * (max_num_bonds - len(a2b[a])) for a in range(n_atoms)]
+
+    return GraphData(node_features=f_atoms,
+                     edge_index=np.asarray([src, dest], dtype=int),
+                     edge_features=f_ini_atoms_bonds,
+                     global_features=None,
+                     a2b=a2b,
+                     b2a=b2a,
+                     b2revb=b2revb)
+
+  def _generate_global_features(self, datapoint: RDKitMol):
+    # generate features and fix nans
+    return NotImplementedError
+
+  def _phase_features_generator(self, datapoint: RDKitMol):
+    return NotImplementedError
+
+  def _generate_atom_descriptors(self, datapoint: RDKitMol):
+    return NotImplementedError
