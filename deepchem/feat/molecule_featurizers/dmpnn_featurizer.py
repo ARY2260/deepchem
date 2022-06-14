@@ -289,58 +289,69 @@ class DMPNNFeaturizer(MolecularFeaturizer):
       raise ValueError(
           "Feature field should contain smiles for DMPNN featurizer!")
 
-    n_atoms_0padded: int # number of atoms
-    n_bonds_0padded: int = 1  # number of bonds
-    f_atoms: np.ndarray = np.asarray([[0]*GraphConvConstants.ATOM_FDIM]) # initial input is a zero padding | mapping from atom index to atom features
-    f_ini_atoms_bonds: np.ndarray = np.asarray([[0]*(GraphConvConstants.ATOM_FDIM + GraphConvConstants.BOND_FDIM)])  # mapping from bond index to concat(in_atom, bond) features
-    a2b: List[List[int]] = [[]] # mapping from atom index to incoming bond indices
-    b2a: List[int] = [0]  # mapping from bond index to the index of the atom the bond is coming from
-    b2revb: List[int] = [0]  # mapping from bond index to the index of the reverse bon
+    num_atoms: int  # number of atoms
+    num_bonds: int = 1  # number of bonds
+
+    # mapping from atom index to atom features | initial input is a zero padding
+    f_atoms: np.ndarray = np.asarray([[0] * GraphConvConstants.ATOM_FDIM])
+
+    # mapping from bond index to concat(in_atom, bond) features | initial input is a zero padding
+    f_ini_atoms_bonds: np.ndarray = np.asarray(
+        [[0] * (GraphConvConstants.ATOM_FDIM + GraphConvConstants.BOND_FDIM)])
+
+    # mapping from bond index to the index of the atom the bond is coming from
+    bond_to_ini_atom: List[int] = [0]
+
+    # mapping from bond index to the index of the reverse bond
+    b2revb: List[int] = [0]
 
     # get atom features
-    np.concatenate((f_atoms, [atom_features(atom) for atom in datapoint.GetAtoms()]), axis=0)
-    n_atoms_0padded = len(f_atoms)
+    np.concatenate(
+        (f_atoms,
+         np.asarray([atom_features(atom) for atom in datapoint.GetAtoms()])),
+        axis=0)
+    num_atoms = len(f_atoms) - 1
 
-    a2b.extend([[] for i in range(n_atoms_0padded)])
+    mapping: np.ndarray = np.zeros([num_atoms + 1, num_atoms + 1], dtype=int)
 
-    # get bond features
-    for a1 in range(1, n_atoms_0padded):
-      for a2 in range(a1 + 1, n_atoms_0padded):
-        bond = datapoint.GetBondBetweenAtoms(a1-1, a2-1)
+    for a1 in range(1, num_atoms + 1):  # get matrix mapping of bonds
+      for a2 in range(a1 + 1, num_atoms + 1):
+
+        bond = datapoint.GetBondBetweenAtoms(a1 - 1, a2 - 1)
 
         if bond is None:
           continue
 
+        # get bond features
         f_bond: np.ndarray = np.asarray(bond_features(bond))
 
         np.append(f_ini_atoms_bonds, f_atoms[a1].extend(f_bond))
         np.append(f_ini_atoms_bonds, f_atoms[a2].extend(f_bond))
 
-        b1 = n_bonds_0padded
-        b2 = b1 + 1
+        b1 = num_bonds
+        b2 = num_bonds + 1
+        mapping[a1][a2] = b1
+        mapping[a2][a1] = b2
 
-        a2b[a2].append(b1)  # b1 = a1 --> a2
-        a2b[a1].append(b2)  # b2 = a2 --> a1
-
-        b2a.append(a1)
-        b2a.append(a2)
+        bond_to_ini_atom.append(a1)
+        bond_to_ini_atom.append(a2)
+        num_bonds += 2
 
         b2revb.append(b2)
         b2revb.append(b1)
 
-        n_bonds_0padded += 2
+    # get mapping which maps bond index to 'array of indices of the bonds' incoming at the initial atom of the bond
+    mapping = mapping.transpose()[bond_to_ini_atom]
 
-    max_num_bonds = max(1, max(len(incoming_bonds) for incoming_bonds in a2b))
-    
-    a2b = [a2b[a] + [0] * (max_num_bonds - len(a2b[a])) for a in range(n_atoms_0padded)]
+    # replace the reverse bonds with zeros
+    for count, i in enumerate(b2revb):
+      mapping[count][np.where(mapping[count] == i)] = 0
 
     return GraphData(node_features=f_atoms,
-                     edge_index=np.asarray([]),
+                     edge_index=np.empty(0),
                      edge_features=f_ini_atoms_bonds,
                      global_features=None,
-                     a2b=a2b,
-                     b2a=b2a,
-                     b2revb=b2revb)
+                     mapping=mapping)
 
   def _generate_global_features(self, datapoint: RDKitMol):
     # generate features and fix nans
