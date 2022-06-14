@@ -289,36 +289,24 @@ class DMPNNFeaturizer(MolecularFeaturizer):
       raise ValueError(
           "Feature field should contain smiles for DMPNN featurizer!")
 
-    n_atoms: int  # number of atoms
-    n_bonds: int = 0  # number of bonds
-    f_atoms: np.ndarray  # mapping from atom index to atom features
-    f_ini_atoms_bonds: np.ndarray = np.asarray(
-        [])  # mapping from bond index to concat(in_atom, bond) features
-    a2b: List[List[int]]  # mapping from atom index to incoming bond indices
-    b2a: List[int] = [
-    ]  # mapping from bond index to the index of the atom the bond is coming from
-    b2revb: List[int] = [
-    ]  # mapping from bond index to the index of the reverse bon
+    n_atoms_0padded: int # number of atoms
+    n_bonds_0padded: int = 1  # number of bonds
+    f_atoms: np.ndarray = np.asarray([[0]*GraphConvConstants.ATOM_FDIM]) # initial input is a zero padding | mapping from atom index to atom features
+    f_ini_atoms_bonds: np.ndarray = np.asarray([[0]*(GraphConvConstants.ATOM_FDIM + GraphConvConstants.BOND_FDIM)])  # mapping from bond index to concat(in_atom, bond) features
+    a2b: List[List[int]] = [[]] # mapping from atom index to incoming bond indices
+    b2a: List[int] = [0]  # mapping from bond index to the index of the atom the bond is coming from
+    b2revb: List[int] = [0]  # mapping from bond index to the index of the reverse bon
 
     # get atom features
-    f_atoms = np.asarray([atom_features(atom) for atom in datapoint.GetAtoms()])
-    n_atoms = len(f_atoms)
+    np.concatenate((f_atoms, [atom_features(atom) for atom in datapoint.GetAtoms()]), axis=0)
+    n_atoms_0padded = len(f_atoms)
 
-    # construct edge (bond) index
-    src, dest = [], []
-    for bond in datapoint.GetBonds():
-      # add edge list considering a directed graph
-      start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
-      src += [start, end]
-      dest += [end, start]
-
-    # initialize atom to bond mapping for each atom
-    a2b = [[] for i in range(n_atoms)]
+    a2b.extend([[] for i in range(n_atoms_0padded)])
 
     # get bond features
-    for a1 in range(n_atoms):
-      for a2 in range(a1 + 1, n_atoms):
-        bond = datapoint.GetBondBetweenAtoms(a1, a2)
+    for a1 in range(1, n_atoms_0padded):
+      for a2 in range(a1 + 1, n_atoms_0padded):
+        bond = datapoint.GetBondBetweenAtoms(a1-1, a2-1)
 
         if bond is None:
           continue
@@ -328,7 +316,7 @@ class DMPNNFeaturizer(MolecularFeaturizer):
         np.append(f_ini_atoms_bonds, f_atoms[a1].extend(f_bond))
         np.append(f_ini_atoms_bonds, f_atoms[a2].extend(f_bond))
 
-        b1 = n_bonds
+        b1 = n_bonds_0padded
         b2 = b1 + 1
 
         a2b[a2].append(b1)  # b1 = a1 --> a2
@@ -340,13 +328,14 @@ class DMPNNFeaturizer(MolecularFeaturizer):
         b2revb.append(b2)
         b2revb.append(b1)
 
-        n_bonds += 2
+        n_bonds_0padded += 2
 
     max_num_bonds = max(1, max(len(incoming_bonds) for incoming_bonds in a2b))
-    a2b = [a2b[a] + [0] * (max_num_bonds - len(a2b[a])) for a in range(n_atoms)]
+    
+    a2b = [a2b[a] + [0] * (max_num_bonds - len(a2b[a])) for a in range(n_atoms_0padded)]
 
     return GraphData(node_features=f_atoms,
-                     edge_index=np.asarray([src, dest], dtype=int),
+                     edge_index=np.asarray([]),
                      edge_features=f_ini_atoms_bonds,
                      global_features=None,
                      a2b=a2b,
