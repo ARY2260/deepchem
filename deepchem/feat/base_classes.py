@@ -242,6 +242,15 @@ class MolecularFeaturizer(Featurizer):
   The subclasses of this class require RDKit to be installed.
   """
 
+  def __init__(self, use_original_atom_ranks=False):
+    """
+    Parameters
+    ----------
+    use_original_atom_ranks: bool, default False
+      Whether to use original atom ranking or canonical ranking (default)
+    """
+    self.use_original_atom_ranks = use_original_atom_ranks
+
   def featurize(self, datapoints, log_every_n=1000, **kwargs) -> np.ndarray:
     """Calculate features for molecules.
 
@@ -288,10 +297,15 @@ class MolecularFeaturizer(Featurizer):
         if isinstance(mol, str):
           # mol must be a RDKit Mol object, so parse a SMILES
           mol = Chem.MolFromSmiles(mol)
-          # SMILES is unique, so set a canonical order of atoms
-          new_order = rdmolfiles.CanonicalRankAtoms(mol)
-          mol = rdmolops.RenumberAtoms(mol, new_order)
-
+          try:
+            if not self.use_original_atom_ranks:  # condition if the original atom ranking in required
+              # SMILES is unique, so set a canonical order of atoms
+              new_order = rdmolfiles.CanonicalRankAtoms(mol)
+              mol = rdmolops.RenumberAtoms(mol, new_order)
+          except AttributeError:
+            # SMILES is unique, so set a canonical order of atoms
+            new_order = rdmolfiles.CanonicalRankAtoms(mol)
+            mol = rdmolops.RenumberAtoms(mol, new_order)
         kwargs_per_datapoint = {}
         for key in kwargs.keys():
           kwargs_per_datapoint[key] = kwargs[key][i]

@@ -1,9 +1,14 @@
 # flake8: noqa
 
+import numpy as np
 from rdkit import Chem
 from typing import List, Tuple, Union, Dict, Set, Sequence
+import logging
 import deepchem as dc
-from deepchem.utils.typing import RDKitAtom
+from deepchem.utils.typing import RDKitAtom, RDKitMol
+
+from deepchem.feat.graph_data import GraphData
+from deepchem.feat.base_classes import MolecularFeaturizer
 
 from deepchem.utils.molecule_feature_utils import one_hot_encode
 from deepchem.utils.molecule_feature_utils import get_atom_total_degree_one_hot
@@ -13,6 +18,8 @@ from deepchem.utils.molecule_feature_utils import get_atom_hybridization_one_hot
 from deepchem.utils.molecule_feature_utils import get_atom_is_in_aromatic_one_hot
 
 from deepchem.feat.graph_features import bond_features as b_Feats
+
+logger = logging.getLogger(__name__)
 
 
 class GraphConvConstants(object):
@@ -254,3 +261,226 @@ def map_reac_to_prod(
                   List[int]] = (reac_id_to_prod_id, only_prod_ids,
                                 only_reac_ids)
   return mappings
+
+
+class DMPNNFeaturizer(MolecularFeaturizer):
+  """This class is a featurizer for Directed Message Passing Neural Network (D-MPNN) implementation
+
+  The default node(atom) and edge(bond) representations are based on
+  `Analyzing Learned Molecular Representations for Property Prediction paper <https://arxiv.org/pdf/1904.01561.pdf>`_.
+
+  The default node representation are constructed by concatenating the following values,
+  and the feature length is 133.
+
+  - Atomic num: A one-hot vector of this atom, in a range of first 100 atoms.
+  - Degree: A one-hot vector of the degree (0-5) of this atom.
+  - Formal charge: Integer electronic charge, -1, -2, 1, 2, 0.
+  - Chirality: A one-hot vector of the chirality tag (0-3) of this atom.
+  - Number of Hydrogens: A one-hot vector of the number of hydrogens (0-4) that this atom connected.
+  - Hybridization: A one-hot vector of "SP", "SP2", "SP3", "SP3D", "SP3D2".
+  - Aromatic: A one-hot vector of whether the atom belongs to an aromatic ring.
+  - Mass: Atomic mass * 0.01
+
+  The default edge representation are constructed by concatenating the following values,
+  and the feature length is 14.
+
+  - Bond type: A one-hot vector of the bond type, "single", "double", "triple", or "aromatic".
+  - Same ring: A one-hot vector of whether the atoms in the pair are in the same ring.
+  - Conjugated: A one-hot vector of whether this bond is conjugated or not.
+  - Stereo: A one-hot vector of the stereo configuration (0-5) of a bond.
+
+  If you want to know more details about features, please check the paper [1]_ and
+  utilities in deepchem.utils.molecule_feature_utils.py.
+
+  Examples
+  --------
+  >>> smiles = ["C1=CC=CN=C1", "C1CCC1"]
+  >>> featurizer = DMPNNFeaturizer()
+  >>> out = featurizer.featurize(smiles)
+  >>> type(out[0])
+  <class 'deepchem.feat.graph_data.GraphData'>
+  >>> out[0].num_node_features
+  133
+  >>> out[0].node_features.shape
+  (6, 133)
+  >>> out[0].node_features_zero_padded.shape
+  (7, 133)
+  >>> out[0].num_edges
+  12
+  >>> out[0].concatenated_features_zero_padded.shape
+  (13, 147)
+  >>> len(out[0].mapping)
+  13
+
+  References
+  ----------
+  .. [1] Kearnes, Steven, et al. "Molecular graph convolutions: moving beyond fingerprints."
+     Journal of computer-aided molecular design 30.8 (2016):595-608.
+
+  Note
+  ----
+  This class requires RDKit to be installed.
+  """
+
+  def __init__(self,
+               features_generator=None,
+               is_adding_hs: bool = False,
+               use_original_atom_ranks: bool = False,
+               features_scaling: bool = False,
+               atom_descriptor_scaling: bool = False,
+               bond_feature_scaling: bool = False) -> None:
+    """
+    Parameters
+    ----------
+    features_generator:
+      # TODO: Implement global feature generator
+    is_adding_hs: bool, default False
+      Whether to add Hs or not.
+    use_original_atom_ranks: bool, default False
+      Whether to use original atom mapping or canonical atom mapping
+    features_scaling: bool, default False
+      # TODO: feature normalization
+    atom_descriptor_scaling: bool, default False
+      # TODO: descriptor normalization
+    bond_feature_scaling: bool, default False
+      # TODO: bond feature normalization
+    """
+    self.features_generator = features_generator
+    self.is_adding_hs = is_adding_hs
+    self.use_original_atom_ranks = use_original_atom_ranks
+    self.features_scaling = features_scaling
+    self.atom_descriptor_scaling = atom_descriptor_scaling
+    self.bond_feature_scaling = bond_feature_scaling
+    self.atom_descriptors = None
+    self.phase_features = None
+
+  def _featurize(self, datapoint: RDKitMol, **kwargs) -> GraphData:
+    """Calculate molecule graph features from RDKit mol object.
+
+    Parameters
+    ----------
+    datapoint: rdkit.Chem.rdchem.Mol
+      RDKit mol object.
+
+    Returns
+    -------
+    graph: GraphData
+      A molecule graph object with features:
+      - node_features: Node feature matrix with shape [num_nodes, num_node_features]
+      - edge_index: Graph connectivity in COO format with shape [2, num_edges]
+      - global_features: None # TODO: to be implemented
+      - mapping: Mapping from 'bond index' to array of indices (of the bonds incoming at the initial atom of the bond) with shape [num_nodes + 1, maximum incoming bonds]
+      - node_features_zero_padded: Zero-padded node feature matrix with shape [num_nodes + 1, num_node_features]
+      - concatenated_features_zero_padded: Zero-padded mapping from bond index to concatenated (incoming atom, bond) features with shape [num_edges + 1, num_node_features + num_bond_features]
+    """
+    if isinstance(datapoint, Chem.rdchem.Mol):
+      if self.is_adding_hs:
+        datapoint = Chem.AddHs(datapoint)
+    else:
+      raise ValueError(
+          "Feature field should contain smiles for DMPNN featurizer!")
+
+    num_atoms: int  # number of atoms
+    num_bonds: int = 1  # number of bonds
+
+    atom_fdim = GraphConvConstants.ATOM_FDIM
+    bond_fdim = GraphConvConstants.BOND_FDIM
+    concat_fdim = atom_fdim + bond_fdim
+
+    # mapping from atom index to atom features | initial input is a zero padding
+    f_atoms_zero_padded: np.ndarray = np.asarray([[0] * atom_fdim], dtype=float)
+
+    # mapping from bond index to concat(in_atom, bond) features | initial input is a zero padding
+    f_ini_atoms_bonds_zero_padded: np.ndarray = np.asarray(
+        [[0] * (atom_fdim + bond_fdim)], dtype=float)
+
+    # mapping from bond index to the index of the atom the bond is coming from
+    bond_to_ini_atom: List[int] = [0]
+
+    # mapping from bond index to the index of the reverse bond
+    b2revb: List[int] = [0]
+
+    # get atom features
+    f_atoms: np.ndarray = np.asarray(
+        [atom_features(atom) for atom in datapoint.GetAtoms()], dtype=float)
+
+    f_atoms_zero_padded = np.concatenate((f_atoms_zero_padded, f_atoms), axis=0)
+    num_atoms = len(f_atoms_zero_padded) - 1
+
+    # mapping: np.ndarray = np.zeros([num_atoms + 1, num_atoms + 1], dtype=int)
+    atom_to_incoming_bonds: List[List[int]] = [[] for i in range(num_atoms + 1)]
+
+    for a1 in range(1, num_atoms + 1):  # get matrix mapping of bonds
+      for a2 in range(a1 + 1, num_atoms + 1):
+        bond = datapoint.GetBondBetweenAtoms(a1 - 1, a2 - 1)
+
+        if bond is None:
+          continue
+
+        # get bond features
+        f_bond: np.ndarray = np.asarray(bond_features(bond), dtype=float)
+
+        _ = np.concatenate((f_atoms_zero_padded[a1], f_bond),
+                           axis=0).reshape([1, concat_fdim])
+        f_ini_atoms_bonds_zero_padded = np.concatenate(
+            (f_ini_atoms_bonds_zero_padded, _), axis=0)
+
+        _ = np.concatenate((f_atoms_zero_padded[a2], f_bond),
+                           axis=0).reshape([1, concat_fdim])
+        f_ini_atoms_bonds_zero_padded = np.concatenate(
+            (f_ini_atoms_bonds_zero_padded, _), axis=0)
+
+        b1 = num_bonds
+        b2 = num_bonds + 1
+
+        atom_to_incoming_bonds[a2].append(b1)  # b1 = a1 --> a2
+        atom_to_incoming_bonds[a1].append(b2)  # b2 = a2 --> a1
+
+        bond_to_ini_atom.append(a1)
+        bond_to_ini_atom.append(a2)
+        num_bonds += 2
+
+        b2revb.append(b2)
+        b2revb.append(b1)
+
+    max_num_bonds = max(
+        1,
+        max(len(incoming_bonds) for incoming_bonds in atom_to_incoming_bonds))
+    atom_to_incoming_bonds = [
+        atom_to_incoming_bonds[a] + [0] *
+        (max_num_bonds - len(atom_to_incoming_bonds[a]))
+        for a in range(num_atoms + 1)
+    ]
+
+    # get mapping which maps bond index to 'array of indices of the bonds' incoming at the initial atom of the bond
+    mapping = np.asarray(atom_to_incoming_bonds)[bond_to_ini_atom]
+
+    # replace the reverse bonds with zeros
+    for count, i in enumerate(b2revb):
+      mapping[count][np.where(mapping[count] == i)] = 0
+
+    # construct edge (bond) index
+    src, dest = [], []
+    for bond in datapoint.GetBonds():
+      # add edge list considering a directed graph
+      start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+      src += [start, end]
+      dest += [end, start]
+
+    return GraphData(
+        node_features=f_atoms,
+        edge_index=np.asarray([src, dest], dtype=int),
+        global_features=None,
+        mapping=mapping,
+        node_features_zero_padded=f_atoms_zero_padded,
+        concatenated_features_zero_padded=f_ini_atoms_bonds_zero_padded)
+
+  def _generate_global_features(self, datapoint: RDKitMol):
+    # TODO: generate features and fix nans
+    return NotImplementedError
+
+  def _phase_features_generator(self, datapoint: RDKitMol):
+    return NotImplementedError
+
+  def _generate_atom_descriptors(self, datapoint: RDKitMol):
+    return NotImplementedError
