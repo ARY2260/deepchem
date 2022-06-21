@@ -1,5 +1,4 @@
 # flake8: noqa
-
 """
 Test for DMPNN Featurizer class
 """
