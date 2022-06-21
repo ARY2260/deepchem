@@ -1,8 +1,9 @@
+# flake8: noqa
+
 """
 Test for DMPNN Featurizer class
 """
 
-# from multiprocessing import dummy
 from deepchem.feat.base_classes import MolecularFeaturizer
 from deepchem.feat.molecule_featurizers.dmpnn_featurizer import DMPNNFeaturizer, GraphConvConstants
 from rdkit import Chem
