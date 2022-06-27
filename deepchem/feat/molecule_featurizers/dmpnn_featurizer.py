@@ -9,6 +9,7 @@ from deepchem.utils.typing import RDKitAtom, RDKitMol
 
 from deepchem.feat.graph_data import GraphData
 from deepchem.feat.base_classes import MolecularFeaturizer
+from deepchem.feat.molecule_featurizers.circular_fingerprint import CircularFingerprint
 
 from deepchem.utils.molecule_feature_utils import one_hot_encode
 from deepchem.utils.molecule_feature_utils import get_atom_total_degree_one_hot
@@ -42,6 +43,7 @@ class GraphConvConstants(object):
   # len(choices) +1 and len(ATOM_FEATURES_HYBRIDIZATION) +1 to include room for unknown set
   # + 2 at end for is_in_aromatic and mass
   BOND_FDIM = 14
+  FEATURE_GENERATORS = {"morgan": CircularFingerprint(radius = 2, size = 2048, sparse = False)}
 
 
 def get_atomic_num_one_hot(atom: RDKitAtom,
@@ -346,6 +348,7 @@ class DMPNNFeaturizer(MolecularFeaturizer):
       # TODO: bond feature normalization
     """
     self.features_generator = features_generator
+    self.available_generators = GraphConvConstants.FEATURE_GENERATORS
     self.is_adding_hs = is_adding_hs
     self.use_original_atom_ranks = use_original_atom_ranks
     self.features_scaling = features_scaling
@@ -379,6 +382,8 @@ class DMPNNFeaturizer(MolecularFeaturizer):
     else:
       raise ValueError(
           "Feature field should contain smiles for DMPNN featurizer!")
+
+    global_features = self._generate_global_features(datapoint)
 
     num_atoms: int  # number of atoms
     num_bonds: int = 1  # number of bonds
@@ -470,14 +475,33 @@ class DMPNNFeaturizer(MolecularFeaturizer):
     return GraphData(
         node_features=f_atoms,
         edge_index=np.asarray([src, dest], dtype=int),
-        global_features=None,
+        global_features=global_features,
         mapping=mapping,
         node_features_zero_padded=f_atoms_zero_padded,
         concatenated_features_zero_padded=f_ini_atoms_bonds_zero_padded)
 
   def _generate_global_features(self, datapoint: RDKitMol):
     # TODO: generate features and fix nans
-    return NotImplementedError
+    global_features = []
+    generators_list = self.available_generators.keys()
+    for generator in self.features_generator:
+      if generator in generators_list:
+        global_featurizer = self.available_generators[generator]
+        if datapoint.GetNumHeavyAtoms() > 0:
+            global_features.extend(global_featurizer.featurize(datapoint)[0])
+        # for H2
+        elif datapoint.GetNumHeavyAtoms() == 0:
+            # not all features are equally long, so used methane as dummy molecule to determine length
+            global_features.extend(np.zeros(len(global_featurizer.featurize(Chem.MolFromSmiles('C'))[0])))
+      else:
+        logger.warning(f"{generator} generator is not available in DMPNN")
+
+    # Fix nans in features
+    replace_token = 0
+    if global_features is not None:
+        global_features = np.where(np.isnan(global_features), replace_token, global_features)
+
+    return np.asarray(global_features)
 
   def _phase_features_generator(self, datapoint: RDKitMol):
     return NotImplementedError
