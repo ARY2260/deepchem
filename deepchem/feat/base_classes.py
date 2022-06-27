@@ -242,14 +242,14 @@ class MolecularFeaturizer(Featurizer):
   The subclasses of this class require RDKit to be installed.
   """
 
-  def __init__(self, use_original_atom_ranks=False):
+  def __init__(self, use_original_atoms_order=False):
     """
     Parameters
     ----------
-    use_original_atom_ranks: bool, default False
-      Whether to use original atom ranking or canonical ranking (default)
+    use_original_atoms_order: bool, default False
+      Whether to use original atom ordering or canonical ordering (default)
     """
-    self.use_original_atom_ranks = use_original_atom_ranks
+    self.use_original_atoms_order = use_original_atoms_order
 
   def featurize(self, datapoints, log_every_n=1000, **kwargs) -> np.ndarray:
     """Calculate features for molecules.
@@ -295,14 +295,15 @@ class MolecularFeaturizer(Featurizer):
 
       try:
         if isinstance(mol, str):
-          # mol must be a RDKit Mol object, so parse a SMILES
-          mol = Chem.MolFromSmiles(mol)
-          try:
-            if not self.use_original_atom_ranks:  # condition if the original atom ranking in required
-              # SMILES is unique, so set a canonical order of atoms
-              new_order = rdmolfiles.CanonicalRankAtoms(mol)
-              mol = rdmolops.RenumberAtoms(mol, new_order)
-          except AttributeError:
+          # condition if the original atom order is required
+          if hasattr(
+              self,
+              'use_original_atoms_order') and self.use_original_atoms_order:
+            # mol must be a RDKit Mol object, so parse a SMILES
+            mol = Chem.MolFromSmiles(mol)
+          else:
+            # mol must be a RDKit Mol object, so parse a SMILES
+            mol = Chem.MolFromSmiles(mol)
             # SMILES is unique, so set a canonical order of atoms
             new_order = rdmolfiles.CanonicalRankAtoms(mol)
             mol = rdmolops.RenumberAtoms(mol, new_order)
