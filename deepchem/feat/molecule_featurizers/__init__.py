@@ -12,7 +12,7 @@ from deepchem.feat.molecule_featurizers.one_hot_featurizer import OneHotFeaturiz
 from deepchem.feat.molecule_featurizers.sparse_matrix_one_hot_featurizer import SparseMatrixOneHotFeaturizer
 from deepchem.feat.molecule_featurizers.pubchem_fingerprint import PubChemFingerprint
 from deepchem.feat.molecule_featurizers.raw_featurizer import RawFeaturizer
-from deepchem.feat.molecule_featurizers.rdkit_descriptors import RDKitDescriptors
+from deepchem.feat.molecule_featurizers.rdkit_descriptors import RDKitDescriptors, RDKit2DFeaturizer
 from deepchem.feat.molecule_featurizers.smiles_to_image import SmilesToImage
 from deepchem.feat.molecule_featurizers.smiles_to_seq import SmilesToSeq, create_char_to_idx
 from deepchem.feat.molecule_featurizers.mol_graph_conv_featurizer import MolGraphConvFeaturizer

@@ -96,3 +96,38 @@ class RDKitDescriptors(MolecularFeaturizer):
         feature = function(datapoint)
       features.append(feature)
     return np.asarray(features)
+
+
+class RDKit2DFeaturizer(MolecularFeaturizer):
+  """
+  """
+  def __init__(self, is_normalized: bool = False):
+    """
+    """
+    self.is_normalized: bool = is_normalized
+    super().__init__()
+
+  def _featurize(self, datapoint: RDKitMol, **kwargs) -> np.ndarray:
+    """
+    """
+    try:
+      from descriptastorus.descriptors.DescriptorGenerator import DescriptorGenerator
+      from descriptastorus.descriptors import rdDescriptors, rdNormalizedDescriptors
+    except ModuleNotFoundError:
+      raise ImportError("This class requires `descriptastorus` to be installed.")
+    
+    try:
+      from rdkit import Chem
+    except ModuleNotFoundError:
+      raise ImportError("This class requires RDKit to be installed.")
+    smiles: str = Chem.MolToSmiles(datapoint, isomericSmiles=True)
+
+    generator: DescriptorGenerator
+
+    if self.is_normalized:
+      generator = rdNormalizedDescriptors.RDKit2DNormalized()
+    else:
+      generator = rdDescriptors.RDKit2D()
+
+    features: np.ndarray = np.asarray(generator.processMol(datapoint, smiles)[1:])
+    return features

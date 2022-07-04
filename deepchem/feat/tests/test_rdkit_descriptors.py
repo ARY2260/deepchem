@@ -4,7 +4,7 @@ Test basic molecular features.
 import numpy as np
 import unittest
 
-from deepchem.feat import RDKitDescriptors
+from deepchem.feat import RDKitDescriptors, RDKit2DFeaturizer
 
 
 class TestRDKitDescriptors(unittest.TestCase):
@@ -59,3 +59,33 @@ class TestRDKitDescriptors(unittest.TestCase):
         descriptors[0, featurizer.descriptors.index('ExactMolWt')],
         180,
         atol=0.1)
+
+class TestRDKit2DFeaturizer(unittest.TestCase):
+  """
+  Test for `RDKit2DFeaturizer` class.
+  """
+
+  def setUp(self):
+    """
+    Set up tests.
+    """
+    from rdkit import Chem
+    smiles = 'CC(=O)OC1=CC=CC=C1C(=O)O'
+    self.mol = Chem.MolFromSmiles(smiles)
+  
+  def test_default_featurizer(self):
+    """
+    Test for featurization of given smile using `RDKit2DFeaturizer` class with no input parameters.
+    """
+    featurizer = RDKit2DFeaturizer()
+    features = featurizer.featurize(self.mol)
+    assert features.shape == (1, 200)
+
+  def test_featurizer_normalised(self):
+    """
+    Test for featurization of given smile using `RDKit2DFeaturizer` class with normalization
+    """
+    featurizer = RDKit2DFeaturizer(is_normalized=True)
+    features = featurizer.featurize(self.mol)
+    assert features.shape == (1, 200)
+    assert len(np.where(features>1.0)[0]) == 0

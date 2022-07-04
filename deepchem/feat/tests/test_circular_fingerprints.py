@@ -3,41 +3,51 @@ Test topological fingerprints.
 """
 import unittest
 from deepchem.feat import CircularFingerprint
+import numpy as np
 
 
 class TestCircularFingerprint(unittest.TestCase):
   """
-    Tests for CircularFingerprint.
-    """
+  Tests for CircularFingerprint.
+  """
 
   def setUp(self):
     """
-        Set up tests.
-        """
+    Set up tests.
+    """
     from rdkit import Chem
     smiles = 'CC(=O)OC1=CC=CC=C1C(=O)O'
     self.mol = Chem.MolFromSmiles(smiles)
 
   def test_circular_fingerprints(self):
     """
-        Test CircularFingerprint.
-        """
+    Test CircularFingerprint.
+    """
     featurizer = CircularFingerprint()
     rval = featurizer([self.mol])
     assert rval.shape == (1, 2048)
 
+  def test_count_based_circular_fingerprints(self):
+    """
+    Test CircularFingerprint with counts-based encoding
+    """
+    featurizer = CircularFingerprint(is_counts_based=True)
+    rval = featurizer([self.mol])
+    assert rval.shape == (1, 2048)
+    assert len(np.where(rval[0]>1.0)[0]) == 8
+
   def test_circular_fingerprints_with_1024(self):
     """
-        Test CircularFingerprint with 1024 size.
-        """
+    Test CircularFingerprint with 1024 size.
+    """
     featurizer = CircularFingerprint(size=1024)
     rval = featurizer([self.mol])
     assert rval.shape == (1, 1024)
 
   def test_sparse_circular_fingerprints(self):
     """
-        Test CircularFingerprint with sparse encoding.
-        """
+    Test CircularFingerprint with sparse encoding.
+    """
     featurizer = CircularFingerprint(sparse=True)
     rval = featurizer([self.mol])
     assert rval.shape == (1,)
@@ -46,9 +56,9 @@ class TestCircularFingerprint(unittest.TestCase):
 
   def test_sparse_circular_fingerprints_with_smiles(self):
     """
-        Test CircularFingerprint with sparse encoding and SMILES for each
-        fragment.
-        """
+    Test CircularFingerprint with sparse encoding and SMILES for each
+    fragment.
+    """
     featurizer = CircularFingerprint(sparse=True, smiles=True)
     rval = featurizer([self.mol])
     assert rval.shape == (1,)
