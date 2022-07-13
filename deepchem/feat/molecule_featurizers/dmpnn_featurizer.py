@@ -503,109 +503,6 @@ class DMPNNFeaturizer(MolecularFeaturizer):
   The default node(atom) and edge(bond) representations are based on
   `Analyzing Learned Molecular Representations for Property Prediction paper <https://arxiv.org/pdf/1904.01561.pdf>`_.
 
-  ----------------------------------------------------------------------------------------------------------------------------------------------
-
-  Working of DMPNN algorithm:
-
-  Let the diagram given below represent a molecule containing 5 atoms (nodes) and 4 bonds (edges):-
-
-  |   1 --- 2 --- 3
-  |   |     |
-  |   5     4
-
-  Let the bonds from atoms 1->2 ('B[12]') and 2->1 ('B[21]') be considered as 2 different bonds.
-  Hence, by considering the same for all atoms, the total number of bonds = 8.
-
-  Let:
-  - a1, a2, a3, a4, a5 => atom features
-  - h1, h2, h3, h4, h5 => hidden states of atoms
-  - b12, b21, b23, b32, b24, b42, b15, b51 => bond features bonds
-  - (0)h12, (0)h21, (0)h23, (0)h32, (0)h24, (0)h42, (0)h15, (0)h51 => initial hidden states of bonds
-
-  The hidden state of every bond is a function of the concatenated feature vector which contains
-  concatenation of the 'features of initial atom of the bond' and 'bond features'.
-
-  Example: (0)h21 = func(concat(a2, b21))
-
-  The DMPNN model has 2 phases, message-passing phase and read-out phase.
-  The goal of the message-passing phase is to generate 'hidden states of all the atoms in the molecule'.
-
-  The hidden state of an atom is a function of concatenation of 'atom features and messages (at T depth)'.
-  Depth refers to the number of iterations in the message passing phase (here, T iterations).
-  After each iteration, the hidden states of the bonds are updated.
-
-  A message is a sum of 'hidden states of bonds coming to the atom (at T depth)'
-
-  Example: h1 = func(concat(a1, m1))
-           Here, `m1` refers to the message coming to the atom.
-
-           m1 = (T-1)h21 + (T-1)h51 (hidden state of bond 2->1 + hidden state of bond 5->1)(at T depth)
-
-           for, depth T = 2:
-             - the hidden states of the bonds @ 1st iteration will be => (0)h21, (0)h51
-             - the hidden states of the bonds @ 2nd iteration will be => (1)h21, (1)h51
-
-  The hidden states of the bonds @ 1st iteration are already know.
-  For hidden states of the bonds @ 2nd iteration, we follow the criterion that:
-  - "hidden state of the bond is a function of 'initial hidden state of bond' and 'messages coming to that bond in that iteration'"
-
-  Example: (1)h21 = func( (0)h21 , (1)m21 )
-           Here, '(1)m21' refers to the messages coming to that bond 2->1 in that 2nd iteration
-
-  Messages coming to a bond in an iteration is
-   'a sum of hidden states of bonds (from previous iteration) coming to this bond'.
-
-  Example: (1)m21 = (0)h32 + (0)h42   |   2 <--- 3
-                                      |   ^
-                                      |   |
-                                      |   4
-
-  Hence, now h1 = func(
-                       concat(
-                              a1,
-                              [
-                               func( (0)h21 , (0)h32 + (0)h42 ) +
-                               func( (0)h51 , 0 ))
-                              ]
-                             )
-                      )
-  Similarly, h2, h3, h4 and h5 are calculated.
-  Next,all atom hidden states are concatenated to make a feature vector of the molecule:
-    mol_features = [h1, h2, h3, h4, h5]
-
-  Next in read-out phase, the mol_features is passed into feed-forward neural network to get the task-based prediction.
-
-  ----------------------------------------------------------------------------------------------------------------------------------------------
-
-  This class uses `f_ini_atoms_bonds_zero_padded` (equivalent to `concat(a2, b21)`) to get
-  hidden state of the bonds referred by the respective indices in the array.
-
-  This class uses 'mapping' which maps bond index to 'array of indices of the bonds'
-  incoming at the initial atom of the bond (reverse bonds are not considered).
-
-  Hence for example,
-                                   B0    B1     B2      B3      B4      B5      B6      B7      B8
-  f_ini_atoms_bonds_zero_padded = [h0, (0)h12, (0)h21, (0)h23, (0)h32, (0)h24, (0)h42, (0)h15, (0)h51]
-
-  Note: h0 is an empty array of the same size as other hidden states of bond states.
-
-               B0     B1      B2      B3    B4     B5     B6     B7    B8
-  mapping = [ [0,0] [0,B8] [B4,B6] [B1,B6] [0,0] [B1,B4] [0,0] [B2,0] [0,0] ]
-
-  Note: One can observe that b2 is also an incoming bond for b1, but its the reverse bond of b1,
-        so its replaced with 0 in the mapping.
-
-  Later, the encoder will map the concatenated features from the `f_ini_atoms_bonds_zero_padded`
-  to `mapping` in each iteration upto Tth iteration.
-
-  Next the encoder will sum-up the concat features within same bond index.
-
-                m0          (1)m12         (1)m21           (1)m23         (1)m32       (1)m24        (1)m42      (1)m15      (1)m51
-  Example: [ [h0 + h0] [h0 + (0)h51] [(0)h32 + (0)h42] [(0)h12 + (0)h42] [h0 + h0] [(0)h12 + (0)h32] [h0 + h0] [(0)h21 + h0] [h0 + h0] ]
-
-  Hence, this is how, encoder can get messages for message-passing steps.
-  ----------------------------------------------------------------------------------------------------------------------------------------------
-
   The default node representation are constructed by concatenating the following values,
   and the feature length is 133.
 
@@ -636,18 +533,18 @@ class DMPNNFeaturizer(MolecularFeaturizer):
   >>> out = featurizer.featurize(smiles)
   >>> type(out[0])
   <class 'deepchem.feat.graph_data.GraphData'>
+  >>> out[0].num_nodes
+  6
   >>> out[0].num_node_features
   133
   >>> out[0].node_features.shape
   (6, 133)
-  >>> out[0].node_features_zero_padded.shape
-  (7, 133)
+  >>> out[0].num_edge_features
+  14
   >>> out[0].num_edges
   12
-  >>> out[0].concatenated_features_zero_padded.shape
-  (13, 147)
-  >>> len(out[0].mapping)
-  13
+  >>> out[0].edge_features.shape
+  (12, 14)
 
   References
   ----------
@@ -677,33 +574,9 @@ class DMPNNFeaturizer(MolecularFeaturizer):
     self.is_adding_hs = is_adding_hs
     super().__init__(use_original_atom_ranks)
 
-  def _get_concat_features_n_mapping(
-      self, datapoint: RDKitMol, concat_fdim: int,
-      f_atoms_zero_padded: np.ndarray) -> Sequence[np.ndarray]:
-    """
-    construct concatenated featured and mapping
-
-    Parameters
-    ----------
-    datapoint: RDKitMol
-      RDKit mol object.
-    concat_fdim: int
-      Size of concatenated features (atom feature dimension + bond feature dimension).
-    f_atoms_zero_padded: np.ndarray
-      Mapping from atom index to atom features (initial input is a zero padding).
-
-    Returns
-    -------
-    f_ini_atoms_bonds_zero_padded, mapping: Sequence[np.ndarray]
-    """
-    mapper = _MapperDMPNN(datapoint, concat_fdim, f_atoms_zero_padded)
-    f_ini_atoms_bonds_zero_padded = mapper.f_ini_atoms_bonds_zero_padded
-    mapping = mapper.mapping
-    return f_ini_atoms_bonds_zero_padded, mapping
-
   def _construct_bond_index(self, datapoint: RDKitMol) -> np.ndarray:
     """
-    construct edge (bond) index
+    Construct edge (bond) index
 
     Parameters
     ----------
@@ -724,6 +597,41 @@ class DMPNNFeaturizer(MolecularFeaturizer):
       dest += [end, start]
     return np.asarray([src, dest], dtype=int)
 
+  def _get_bond_features(self, datapoint: RDKitMol) -> np.ndarray:
+    """
+    Construct bond(edge) features for the given datapoint
+
+    For each bond index, 2 bond feature arrays are added to the main features array,
+    for the current bond and its reverse bond respectively.
+
+    Note: This method of generating bond features ensures that the shape of the bond features array
+          is always equal to (number of bonds, number of bond features), even if the number of bonds
+          is equal to 0.
+
+    Parameters
+    ----------
+    datapoint: RDKitMol
+      RDKit mol object.
+
+    Returns
+    -------
+    f_bonds: np.ndarray
+      Bond features array
+    """
+    bonds: Chem.rdchem._ROBondSeq = datapoint.GetBonds()
+    
+    bond_fdim: int = GraphConvConstants.BOND_FDIM
+    number_of_bonds: int = len(bonds) * 2 # Note the value is doubled to account for reverse bonds
+    f_bonds: np.ndarray = np.empty((number_of_bonds, bond_fdim))
+    
+    for index in range(0, number_of_bonds, 2):
+      bond_id: int = index//2
+      bond_feature: np.ndarray = np.asarray(bond_features(bonds[bond_id]), dtype=float)
+      f_bonds[index] = bond_feature # bond
+      f_bonds[index + 1] = bond_feature # reverse bond
+    return f_bonds
+    
+
   def _featurize(self, datapoint: RDKitMol, **kwargs) -> GraphData:
     """
     Calculate molecule graph features from RDKit mol object.
@@ -739,9 +647,8 @@ class DMPNNFeaturizer(MolecularFeaturizer):
       A molecule graph object with features:
       - node_features: Node feature matrix with shape [num_nodes, num_node_features]
       - edge_index: Graph connectivity in COO format with shape [2, num_edges]
-      - mapping: Mapping from 'bond index' to array of indices (of the bonds incoming at the initial atom of the bond) with shape [num_nodes + 1, maximum incoming bonds]
-      - node_features_zero_padded: Zero-padded node feature matrix with shape [num_nodes + 1, num_node_features]
-      - concatenated_features_zero_padded: Zero-padded mapping from bond index to concatenated (incoming atom, bond) features with shape [num_edges + 1, num_node_features + num_bond_features]
+      - edge_features: Edge feature matrix with shape [num_edges, num_edge_features]
+      - global_features: Array of global molecular features
     """
     if isinstance(datapoint, Chem.rdchem.Mol):
       if self.is_adding_hs:
@@ -750,38 +657,24 @@ class DMPNNFeaturizer(MolecularFeaturizer):
       raise ValueError(
           "Feature field should contain smiles for DMPNN featurizer!")
 
-    atom_fdim: int = GraphConvConstants.ATOM_FDIM
-    bond_fdim: int = GraphConvConstants.BOND_FDIM
-    concat_fdim: int = atom_fdim + bond_fdim
-
-    # get global features
-    global_features: np.ndarray = np.empty(0)
-    if self.features_generators is not None:
-      global_features = generate_global_features(datapoint,
-                                                 self.features_generators)
-
     # get atom features
     f_atoms: np.ndarray = np.asarray(
         [atom_features(atom) for atom in datapoint.GetAtoms()], dtype=float)
 
-    # mapping from atom index to atom features | initial input is a zero padding
-    f_atoms_zero_padded: np.ndarray = np.zeros((1, atom_fdim))
-    f_atoms_zero_padded = np.concatenate((f_atoms_zero_padded, f_atoms), axis=0)
-
-    # get concatenated features and mapping
-    f_ini_atoms_bonds_zero_padded: np.ndarray
-    mapping: np.ndarray
-
-    f_ini_atoms_bonds_zero_padded, mapping = self._get_concat_features_n_mapping(
-        datapoint, concat_fdim, f_atoms_zero_padded)
+    # get edge(bond) features
+    f_bonds: np.ndarray = self._get_bond_features(datapoint)
 
     # get edge index
     edge_index: np.ndarray = self._construct_bond_index(datapoint)
 
+    # get global features
+    global_features: np.ndarray = None
+    if self.features_generators is not None:
+      global_features = generate_global_features(datapoint,
+                                                 self.features_generators)
+
     return GraphData(
         node_features=f_atoms,
         edge_index=edge_index,
-        global_features=global_features,
-        mapping=mapping,
-        node_features_zero_padded=f_atoms_zero_padded,
-        concatenated_features_zero_padded=f_ini_atoms_bonds_zero_padded)
+        edge_features=f_bonds,
+        global_features=global_features)
