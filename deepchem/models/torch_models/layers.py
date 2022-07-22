@@ -954,6 +954,50 @@ class Affine(nn.Module):
     return x, inverse_log_det_jacobian
 
 
+class DMPNNEncoderLayer(nn.Module):
+  def __init__():
+    pass
+
+  def _get_updated_atoms_hidden_state(self, atom_features, message, atom_to_incoming_bonds):
+    messages_to_atoms = message[atom_features].sum(1) # num_atoms x hidden_size
+    atoms_hidden_states = self.W_o(torch.cat((atom_features, messages_to_atoms), 1))  # num_atoms x hidden_size
+    atoms_hidden_states = self.activation(atoms_hidden_states)  # num_atoms x hidden_size
+    atoms_hidden_states = self.dropout(atoms_hidden_states)  # num_atoms x hidden_size
+    return atoms_hidden_states  # num_atoms x hidden_size
+
+  def _readout(self, atoms_hidden_states):
+    mol_vec = atoms_hidden_states  # (num_atoms, hidden_size)
+    if self.aggregation == 'mean':
+        mol_vec = mol_vec.sum(dim=0) / len(atoms_hidden_states)
+    elif self.aggregation == 'sum':
+        mol_vec = mol_vec.sum(dim=0)
+    elif self.aggregation == 'norm':
+        mol_vec = mol_vec.sum(dim=0) / self.aggregation_norm
+    else:
+      raise Exception("Invalid aggregation")
+    molecule_hidden_state = torch.reshape(mol_vec, (1, -1))
+    return molecule_hidden_state  # num_molecules x hidden
+
+  def forward(self) -> torch.Tensor:
+    """
+    """
+    input = self.W_i(f_bonds)  # num_bonds x hidden_size
+    message = self.activation(input) # num_bonds x hidden_size
+
+    for _ in range(1, self.depth):
+      message = message[mapping].sum(1)  # num_bonds x hidden_size
+      h_message = input + self.W_h(message) # num_bonds x hidden_size
+      h_message = self.activation(h_message) # num_bonds x hidden_size
+      h_message = self.dropout(h_message) # num_bonds x hidden_size
+
+    # num_atoms x hidden_size
+    atoms_hidden_states = self._get_updated_atoms_hidden_state(atom_features, h_message, atom_to_incoming_bonds)
+
+    # num_molecules x hidden_size
+    molecule_hidden_state = self._readout(atoms_hidden_states)
+    
+    output = reduce(lambda x, y: torch.cat((x, y), dim=1), molecule_hidden_state)
+
 class InteratomicL2Distances(nn.Module):
   """Compute (squared) L2 Distances between atoms given neighbors.
 
