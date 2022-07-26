@@ -725,6 +725,25 @@ def test_mat_generator():
 
 
 @pytest.mark.torch
+def test_dmpnn_encoder_layer():
+  """Test invoking DMPNNEncoderLayer."""
+  input_smile = "CC"
+  feat = dc.feat.DMPNNFeaturizer(features_generators=['morgan'])
+  graph = feat.featurize(input_smile)
+
+  from deepchem.models.torch_models.temp_dmpnn import _MapperDMPNN
+  mapper = _MapperDMPNN(graph[0])
+  atom_features = mapper.atom_features
+  atom_to_incoming_bonds = mapper._get_atom_to_incoming_bonds()
+  f_ini_atoms_bonds, mapping, global_features = mapper.values
+
+  layer = torch_layers.DMPNNEncoderLayer()
+  output = layer(atom_features, f_ini_atoms_bonds, atom_to_incoming_bonds,
+                 mapping, global_features)
+  assert 1 == 2
+
+
+@pytest.mark.torch
 def test_torch_interatomic_l2_distances():
   """Test Invoking the torch equivalent of InteratomicL2Distances"""
   atoms = 5
