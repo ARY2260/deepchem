@@ -1004,10 +1004,10 @@ class DMPNNEncoderLayer(nn.Module):
       # For atom hidden states
     self.W_o = nn.Linear(self.atom_fdim + d_hidden, d_hidden)
 
-  def _get_updated_atoms_hidden_state(self, atom_features, message, atom_to_incoming_bonds):
+  def _get_updated_atoms_hidden_state(self, atom_features, h_message, atom_to_incoming_bonds):
     """
     """
-    messages_to_atoms = message[atom_to_incoming_bonds].sum(1) # num_atoms x hidden_size
+    messages_to_atoms = h_message[atom_to_incoming_bonds].sum(1) # num_atoms x hidden_size
     atoms_hidden_states = self.W_o(torch.cat((atom_features, messages_to_atoms), 1))  # num_atoms x hidden_size
     atoms_hidden_states = self.activation(atoms_hidden_states)  # num_atoms x hidden_size
     atoms_hidden_states = self.dropout(atoms_hidden_states)  # num_atoms x hidden_size
@@ -1024,7 +1024,7 @@ class DMPNNEncoderLayer(nn.Module):
         mol_vec = atoms_hidden_states.sum(dim=0) / self.aggregation_norm
     else:
       raise Exception("Invalid aggregation")
-    molecule_hidden_state = torch.reshape(mol_vec, (1, -1))
+    molecule_hidden_state = mol_vec.view(1, -1)
     return molecule_hidden_state  # num_molecules x hidden_size
 
   def forward(self, atom_features, f_ini_atoms_bonds, atom_to_incoming_bonds, mapping, global_features) -> torch.Tensor:
@@ -1053,6 +1053,23 @@ class DMPNNEncoderLayer(nn.Module):
     
     return output
 
+import deepchem as dc
+input_smile = "CC"
+feat = dc.feat.DMPNNFeaturizer(features_generators=['morgan'])
+graph = feat.featurize(input_smile)
+from deepchem.models.torch_models.temp_dmpnn import _MapperDMPNN
+mapper = _MapperDMPNN(graph[0])
+atom_features = torch.from_numpy(mapper.atom_features).float()
+atom_to_incoming_bonds = torch.from_numpy(
+    mapper._get_atom_to_incoming_bonds())
+f_ini_atoms_bonds, mapping, global_features = mapper.values
+f_ini_atoms_bonds = torch.from_numpy(f_ini_atoms_bonds).float()
+mapping = torch.from_numpy(mapping)
+global_features = torch.from_numpy(global_features).float()
+layer = DMPNNEncoderLayer()
+output = layer(atom_features, f_ini_atoms_bonds, atom_to_incoming_bonds,
+               mapping, global_features)
+assert 1 == 2
 
 class InteratomicL2Distances(nn.Module):
   """Compute (squared) L2 Distances between atoms given neighbors.

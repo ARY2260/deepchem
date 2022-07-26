@@ -141,6 +141,9 @@ class _MapperDMPNN:
     self.mapping = atom_to_incoming_bonds[self.bond_to_ini_atom]
     self._replace_rev_bonds()
 
+    # zero padded at the end
+    self.mapping = np.pad(self.mapping, ((0, 1), (0, 0)),  constant_values=-1)
+
   def _get_atom_to_incoming_bonds(self) -> np.ndarray:
     """
     Method to get atom_to_incoming_bonds mapping
