@@ -727,24 +727,35 @@ def test_mat_generator():
 @pytest.mark.torch
 def test_dmpnn_encoder_layer():
   """Test invoking DMPNNEncoderLayer."""
+  torch.manual_seed(0)
+
   input_smile = "CC"
   feat = dc.feat.DMPNNFeaturizer(features_generators=['morgan'])
   graph = feat.featurize(input_smile)
 
   from deepchem.models.torch_models.temp_dmpnn import _MapperDMPNN
   mapper = _MapperDMPNN(graph[0])
-  atom_features = torch.from_numpy(mapper.atom_features.astype('float64'))
-  atom_to_incoming_bonds = torch.from_numpy(
-      mapper._get_atom_to_incoming_bonds())
-  f_ini_atoms_bonds, mapping, global_features = mapper.values
-  f_ini_atoms_bonds = torch.from_numpy(f_ini_atoms_bonds.astype('float64'))
-  mapping = torch.from_numpy(mapping)
-  global_features = torch.from_numpy(global_features.astype('float64'))
+  atom_features, f_ini_atoms_bonds, atom_to_incoming_bonds, mapping, global_features = mapper.values
 
-  layer = torch_layers.DMPNNEncoderLayer()
+  atom_features = torch.from_numpy(atom_features).float()
+  f_ini_atoms_bonds = torch.from_numpy(f_ini_atoms_bonds).float()
+  atom_to_incoming_bonds = torch.from_numpy(atom_to_incoming_bonds)
+  mapping = torch.from_numpy(mapping)
+  global_features = torch.from_numpy(global_features).float()
+
+  layer = torch_layers.DMPNNEncoderLayer(d_hidden=2)
+  assert layer.W_i.__repr__(
+  ) == 'Linear(in_features=147, out_features=2, bias=False)'
+  assert layer.W_h.__repr__(
+  ) == 'Linear(in_features=2, out_features=2, bias=False)'
+  assert layer.W_o.__repr__(
+  ) == 'Linear(in_features=135, out_features=2, bias=True)'
+
   output = layer(atom_features, f_ini_atoms_bonds, atom_to_incoming_bonds,
                  mapping, global_features)
-  assert 1 == 2
+  readout_output = torch.tensor([[0.1116, 0.0470]])
+  assert output.shape == torch.Size([1, 2 + 2048])
+  assert torch.allclose(output[0][:2], readout_output, atol=1e-4)
 
 
 @pytest.mark.torch

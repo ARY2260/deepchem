@@ -1053,23 +1053,6 @@ class DMPNNEncoderLayer(nn.Module):
     
     return output
 
-import deepchem as dc
-input_smile = "CC"
-feat = dc.feat.DMPNNFeaturizer(features_generators=['morgan'])
-graph = feat.featurize(input_smile)
-from deepchem.models.torch_models.temp_dmpnn import _MapperDMPNN
-mapper = _MapperDMPNN(graph[0])
-atom_features = torch.from_numpy(mapper.atom_features).float()
-atom_to_incoming_bonds = torch.from_numpy(
-    mapper._get_atom_to_incoming_bonds())
-f_ini_atoms_bonds, mapping, global_features = mapper.values
-f_ini_atoms_bonds = torch.from_numpy(f_ini_atoms_bonds).float()
-mapping = torch.from_numpy(mapping)
-global_features = torch.from_numpy(global_features).float()
-layer = DMPNNEncoderLayer()
-output = layer(atom_features, f_ini_atoms_bonds, atom_to_incoming_bonds,
-               mapping, global_features)
-assert 1 == 2
 
 class InteratomicL2Distances(nn.Module):
   """Compute (squared) L2 Distances between atoms given neighbors.
