@@ -1,5 +1,6 @@
 import numpy as np
 
+import copy
 import torch
 import torch.nn as nn
 
@@ -378,10 +379,14 @@ class DMPNN(nn.Module):
     self.enc_dropout_p: float = enc_dropout_p
     self.aggregation: str = aggregation
     self.aggregation_norm: Union[int, float] = aggregation_norm
+    self.encoder_wts_shared: bool = encoder_wts_shared
 
-    # get encoder (its copies will be used by all batches, hence all will have same initial weights)
-    if encoder_wts_shared:
+    # get shared encoder (its copies will be used by all batches, hence all will have same initial weights)
+    if self.encoder_wts_shared:
       self.shared_wts_encoder: nn.Module = self._get_encoder()
+    
+    # initialize encoders list
+    self.encoders = torch.nn.ModuleList([])
 
     # get input size for ffn
     ffn_input: int = enc_hidden + global_features_size
@@ -416,6 +421,29 @@ class DMPNN(nn.Module):
                                     dropout_p=self.enc_dropout_p,
                                     aggregation=self.aggregation,
                                     aggregation_norm=self.aggregation_norm)
+  
+  def _encoder(self, batch_id: int) -> nn.Module:
+    """
+    Method to get an existing encoder object or create a new object based on batch id
+
+    Parameters
+    ----------
+    batch_id: int
+
+    Returns
+    -------
+    nn.Module
+      dmpnn encoder layer object
+    """
+    if len(self.encoders) > batch_id:
+      return self.encoders[batch_id]
+
+    if self.encoder_wts_shared:
+      encoder_copy = copy.deepcopy(self.shared_wts_encoder)
+      self.encoders.append(encoder_copy)
+    else:
+      self.encoders.append(self._get_encoder())
+    return self.encoders[-1]
 
   def forward(self,
               pyg_batch: Batch) -> Union[torch.Tensor, Sequence[torch.Tensor]]:
@@ -452,13 +480,15 @@ class DMPNN(nn.Module):
     # 3. Convert the tensor to a list.
     molecules_unbatch_key: List = torch.diff(
         pyg_batch._slice_dict['atom_features']).tolist()
-
-    # get encoder
-    encoder: nn.Module = self.shared_wts_encoder if hasattr(
-        self, 'shared_wts_encoder') else self._get_encoder()
+    
+    # get batch id
+    if pyg_batch.batch is not None:
+      batch_id = pyg_batch.batch
+    else:
+      batch_id = 0
 
     # num_molecules x (enc_hidden + global_features_size)
-    encodings: torch.Tensor = encoder(atom_features, f_ini_atoms_bonds,
+    encodings: torch.Tensor = self._encoder(batch_id)(atom_features, f_ini_atoms_bonds,
                                       atom_to_incoming_bonds, mapping,
                                       global_features, molecules_unbatch_key)
 
@@ -700,13 +730,15 @@ class DMPNNModel(TorchModel):
     -------
     Tuple[Batch, List[torch.Tensor], List[torch.Tensor]]
     """
+    batch_id: int
     graphs_list: List
     labels: List
     weights: List
 
-    graphs_list, labels, weights = batch
+    [batch_id, graphs_list], labels, weights = batch
     pyg_batch: Batch = Batch()
     pyg_batch = pyg_batch.from_data_list(graphs_list)
+    pyg_batch.batch = batch_id
 
     _, labels, weights = super(DMPNNModel, self)._prepare_batch(
         ([], labels, weights))
@@ -759,10 +791,10 @@ class DMPNNModel(TorchModel):
     Here, [inputs] is list of graphs.
     """
     for epoch in range(epochs):
-      for (X_b, y_b, w_b,
-           ids_b) in dataset.iterbatches(batch_size=self.batch_size,
+      for batch_id, (X_b, y_b, w_b,
+           ids_b) in enumerate(dataset.iterbatches(batch_size=self.batch_size,
                                          deterministic=deterministic,
-                                         pad_batches=pad_batches):
+                                         pad_batches=pad_batches)):
         pyg_graphs_list: List = []
 
         # maximum number of incoming bonds in the batch
@@ -789,4 +821,4 @@ class DMPNNModel(TorchModel):
                                                mode='constant',
                                                value=-1)
 
-        yield (pyg_graphs_list, [y_b], [w_b])
+        yield ([batch_id, pyg_graphs_list], [y_b], [w_b])
