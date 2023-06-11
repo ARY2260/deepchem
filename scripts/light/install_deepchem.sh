@@ -57,4 +57,6 @@ else
     fi
 fi
 # Install all dependencies
+conda env list
+echo "about to update conda env"
 conda env update --file $PWD/env.yml
