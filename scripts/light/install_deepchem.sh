@@ -27,7 +27,7 @@ then
         echo "Installing Tensorflow environment with GPU"
     elif [ "$3" = "torch" ];
     then
-        conda-merge $PWD/requirements/pytorch/env_pytorch.yml $PWD/requirements/pytorch/env_pytorch.gpu.yml $PWD/requirements/env_test.yml > $PWD/env.yml
+        conda-merge $PWD/requirements/env_common.yml $PWD/requirements/torch/env_torch.gpu.yml $PWD/requirements/env_test.yml > $PWD/env.yml
         echo "Installing pytorch environment with GPU"
     elif [ "$3" = "jax" ];
     then
